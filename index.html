@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>質問ボード</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+<style>
+  :root {
+    --ink: #16223a;
+    --paper: #f4f6f9;
+    --surface: #ffffff;
+    --muted: #5b6577;
+    --rule: #d8dde6;
+    --plate: #f3c623;
+    --blue: #1f3f8f;
+    --red: #c0282d;
+    --ok: #1d6b48;
+    --warn: #8a5300;
+    --err: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+    line-height: 1.7;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  [hidden] { display: none !important; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .stripe { height: 6px; background: linear-gradient(to right, var(--blue) 0 33.4%, var(--plate) 33.4% 66.7%, var(--red) 66.7% 100%); }
+
+  /* ───── 学生の画面 ───── */
+  .wrap { max-width: 640px; margin: 0 auto; padding: 18px 18px 48px; }
+  .course { margin: 0; font-size: .82rem; color: var(--muted); }
+  h1 { margin: 0; font-size: 1.4rem; line-height: 1.35; }
+  .team-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: #fff;
+  }
+  .team-bar .k { font-size: .78rem; color: rgba(255, 255, 255, .78); }
+  .team-name { font-weight: 800; font-size: 1.1rem; padding: 0 .5em; border-radius: 8px; background: var(--plate); color: var(--ink); }
+  .team-bar button { margin-left: auto; background: none; border: 1px solid rgba(255, 255, 255, .5); color: #fff; border-radius: 8px; padding: .15em .7em; cursor: pointer; font-size: .85rem; }
+  .team-form { display: flex; gap: 8px; margin-top: 14px; }
+  .team-form input { flex: 1; min-width: 0; padding: .6em .8em; border: 2px solid var(--rule); border-radius: 10px; background: var(--surface); font-size: 1.05rem; }
+  .hint { margin: 6px 0 0; font-size: .85rem; color: var(--muted); }
+
+  .compose { margin-top: 16px; }
+  .compose textarea {
+    display: block; width: 100%; min-height: 110px; resize: vertical;
+    padding: .7em .8em; border: 2px solid var(--rule); border-radius: 12px; background: var(--surface); font-size: 1rem;
+  }
+  .compose textarea:focus { outline: none; border-color: var(--blue); }
+  .compose-bar { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .count { font-size: .85rem; color: var(--muted); margin-right: auto; }
+  .count.over { color: var(--err); font-weight: 700; }
+  .btn {
+    min-height: 46px; padding: .45em 1.3em; border: 0; border-radius: 10px; cursor: pointer;
+    background: var(--ink); color: #fff; font-weight: 700; font-size: 1rem;
+  }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .status { margin: 8px 0 0; min-height: 1.5em; font-size: .9rem; }
+  .status.ok { color: var(--ok); }
+  .status.warn { color: var(--warn); }
+  .status.err { color: var(--err); font-weight: 700; }
+
+  .list-head { display: flex; align-items: center; gap: 10px; margin: 26px 0 6px; }
+  .list-head h2 { margin: 0; font-size: 1.05rem; margin-right: auto; }
+  .sort { display: inline-flex; border: 1px solid var(--rule); border-radius: 9px; overflow: hidden; }
+  .sort button { border: 0; background: var(--surface); padding: .25em .8em; font-size: .85rem; cursor: pointer; }
+  .sort button[aria-pressed="true"] { background: var(--ink); color: #fff; font-weight: 700; }
+
+  .qs { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .q { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 12px 2px; border-bottom: 1px solid var(--rule); }
+  .q.done { opacity: .55; }
+  .like {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+    width: 64px; min-height: 58px; border: 2px solid var(--rule); border-radius: 12px; background: var(--surface); cursor: pointer;
+  }
+  .like .n { font-size: 1.25rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .like .t { font-size: .72rem; color: var(--muted); }
+  .like[aria-pressed="true"] { background: var(--plate); border-color: var(--plate); }
+  .like[aria-pressed="true"] .t { color: var(--ink); }
+  .like:disabled { cursor: default; }
+  .q-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .q-meta { margin: 2px 0 0; font-size: .8rem; color: var(--muted); }
+  .badge { display: inline-block; padding: 0 .45em; border-radius: 6px; font-size: .75rem; font-weight: 700; background: #e3e9f7; color: var(--blue); margin-left: .4em; }
+  .empty { color: var(--muted); padding: 18px 2px; }
+  .notice { margin-top: 16px; padding: .8em 1em; border-left: 4px solid var(--err); background: var(--surface); border-radius: 0 10px 10px 0; }
+
+  /* ───── 投影用の画面 ───── */
+  body.screen { background: var(--ink); color: #fff; }
+  .screen-wrap { display: grid; grid-template-columns: minmax(260px, 22vw) 1fr; gap: 3vw; padding: 2.5vw 3vw; min-height: calc(100vh - 6px); }
+  .join { display: flex; flex-direction: column; gap: 1.2vw; }
+  .join h1 { font-size: clamp(1.4rem, 2.2vw, 2.4rem); color: #fff; }
+  .join .course { color: rgba(255, 255, 255, .7); font-size: clamp(.9rem, 1vw, 1.1rem); }
+  .qr { background: #fff; padding: 12px; border-radius: 14px; align-self: flex-start; width: 100%; max-width: 20vw; min-width: 200px; }
+  .qr img, .qr canvas { display: block; width: 100%; height: auto; }
+  .join-url { font-size: clamp(.8rem, .95vw, 1.05rem); overflow-wrap: anywhere; color: rgba(255, 255, 255, .85); }
+  .tally { font-size: clamp(1rem, 1.3vw, 1.4rem); }
+  .tally b { color: var(--plate); font-size: 1.6em; }
+  .board { display: flex; flex-direction: column; gap: 1.2vw; }
+  .top {
+    display: grid; grid-template-columns: auto 1fr; gap: 2vw; align-items: center;
+    background: var(--surface); color: var(--ink); border-radius: 18px; padding: 2vw 2.4vw;
+  }
+  .votes { text-align: center; min-width: 7vw; }
+  .votes .n { display: block; font-size: clamp(2.6rem, 5.4vw, 6rem); font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+  .votes .t { font-size: clamp(.8rem, 1vw, 1.1rem); color: var(--muted); }
+  .top .q-text { font-size: clamp(1.4rem, 2.6vw, 3rem); font-weight: 700; line-height: 1.45; }
+  .top .q-meta { font-size: clamp(.9rem, 1.2vw, 1.3rem); }
+  .rest { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .rest li { display: grid; grid-template-columns: 5vw 1fr auto; gap: 1.6vw; align-items: baseline; padding: 1vw .4vw; border-bottom: 1px solid rgba(255, 255, 255, .18); }
+  .rest .n { font-size: clamp(1.4rem, 2.2vw, 2.6rem); font-weight: 800; color: var(--plate); text-align: right; font-variant-numeric: tabular-nums; }
+  .rest .q-text { font-size: clamp(1rem, 1.5vw, 1.8rem); }
+  .rest .q-meta { color: rgba(255, 255, 255, .65); font-size: clamp(.8rem, 1vw, 1.1rem); }
+  .rest li.done, .top.done { opacity: .5; }
+  .rest li.hidden-q { opacity: .45; text-decoration: line-through; }
+  .admin { display: flex; gap: 6px; }
+  .admin button { border: 1px solid rgba(255, 255, 255, .5); background: none; color: #fff; border-radius: 8px; padding: .1em .6em; cursor: pointer; font-size: .85rem; white-space: nowrap; }
+  .top .admin button { border-color: var(--rule); color: var(--ink); }
+  .screen .empty { color: rgba(255, 255, 255, .7); font-size: 1.4rem; }
+  @media (max-width: 800px) { .screen-wrap { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: no-preference) { .like[aria-pressed="true"] { transition: background .15s; } }
+</style>
+</head>
+<body>
+<div class="stripe" aria-hidden="true"></div>
+<div id="app"></div>
+
+<script>
+/* ═════════ 設定：GASのウェブアプリのURL（…/exec）を貼る ═════════ */
+const API_URL = 'https://script.google.com/macros/s/AKfycbxpP1tT-Ae7Hd3pzfKUQEcjd2LQDPhZpgvTnKivllIy4Y89m0uLATUORr1RaZG7KU26Og/exec';
+const COURSE = 'ヒューマニスティック・リーダーシップWS2';
+const MAX_TEXT = 200;
+const MAX_TEAM = 20;
+
+/* ═════════ URLのパラメータ ═════════
+ *   ?e=第3回               … イベント（回）ごとに質問を分ける
+ *   ?view=screen           … 投影用の画面
+ *   ?view=screen&key=合言葉 … 投影用の画面＋管理（非表示・読み上げ済み）
+ *   &t=対談①              … 画面に出すタイトル（省略時は e）
+ */
+const P = new URLSearchParams(location.search);
+const EVENT = (P.get('e') || 'default').slice(0, 40);
+const TITLE = P.get('t') || (EVENT === 'default' ? '講師への質問' : EVENT + '　講師への質問');
+const SCREEN = P.get('view') === 'screen';
+const KEY = P.get('key') || '';
+
+/* ═════════ 端末に保存する情報 ═════════ */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+};
+function uuid() { return (crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2)); }
+const DEVICE = store.get('qaDevice', null) || (function () { const d = uuid(); store.set('qaDevice', d); return d; })();
+const LIKED_KEY = 'qaLiked:' + EVENT;
+const PENDING_KEY = 'qaPending:' + EVENT;
+const COOL_KEY = 'qaCool';
+
+let questions = [];
+let liked = new Set(store.get(LIKED_KEY, []));
+let likeQueue = store.get('qaLikeQueue:' + EVENT, []);
+let boost = {};          // いいねを押した直後の表示用（サーバーの数に反映されるまで）
+let sortBy = 'likes';
+let loading = false;
+
+/* ═════════ 通信 ═════════ */
+async function apiGet() {
+  const url = API_URL + '?action=list&e=' + encodeURIComponent(EVENT) + (KEY ? '&key=' + encodeURIComponent(KEY) : '') + '&_=' + Date.now();
+  const r = await fetch(url, { cache: 'no-store' });
+  return r.json();
+}
+async function apiPost(data) {
+  // Content-Type を付けない（text/plain になり、事前確認の通信が発生しない）
+  const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ e: EVENT, device: DEVICE }, data)) });
+  return r.json();
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function load() {
+  if (!API_URL || loading) return;
+  loading = true;
+  try {
+    const j = await apiGet();
+    if (j && j.ok) { questions = j.questions || []; render(); setConn(''); }
+    else setConn('一覧を読み込めませんでした。自動でやり直します。');
+  } catch (e) {
+    setConn('通信できませんでした。自動でやり直します。');
+  } finally { loading = false; }
+}
+
+/* ═════════ 画面の部品 ═════════ */
+function h(tag, attrs, kids) {
+  const n = document.createElement(tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === false) return;
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  });
+  [].concat(kids || []).forEach(c => { if (c !== null && c !== undefined && c !== false) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+  return n;
+}
+function timeText(ms) {
+  if (!ms) return '';
+  const d = new Date(ms);
+  return d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function likesOf(q) { return Math.max(q.likes, boost[q.id] || 0); }
+function sorted(list) {
+  return list.slice().sort((a, b) => {
+    if (SCREEN && a.done !== b.done) return a.done ? 1 : -1;
+    if (sortBy === 'likes' || SCREEN) return (likesOf(b) - likesOf(a)) || (a.time - b.time);
+    return b.time - a.time;
+  });
+}
+
+let connEl = null;
+function setConn(msg) { if (connEl) { connEl.textContent = msg; connEl.hidden = !msg; } }
+
+/* ═════════ 学生の画面 ═════════ */
+let els = {};
+function buildStudent() {
+  const app = document.getElementById('app');
+  app.appendChild(h('div', { class: 'wrap' }, [
+    h('p', { class: 'course', text: COURSE }),
+    h('h1', { text: TITLE }),
+    els.teamBox = h('div'),
+    h('section', { class: 'compose', 'aria-label': '質問を投稿する' }, [
+      els.ta = h('textarea', { maxlength: String(MAX_TEXT), placeholder: '講師に聞いてみたいことを書いてください', 'aria-label': '質問' }),
+      h('div', { class: 'compose-bar' }, [
+        els.count = h('span', { class: 'count', text: '0 / ' + MAX_TEXT }),
+        els.send = h('button', { class: 'btn', type: 'button', text: '投稿する', onclick: send }),
+      ]),
+      els.status = h('p', { class: 'status', role: 'status' }),
+    ]),
+    connEl = h('p', { class: 'notice', hidden: true }),
+    h('div', { class: 'list-head' }, [
+      els.listTitle = h('h2', { text: 'みんなの質問' }),
+      h('div', { class: 'sort', role: 'group', 'aria-label': '並べ替え' }, [
+        els.sLikes = h('button', { type: 'button', 'aria-pressed': 'true', text: 'いいね順', onclick: () => setSort('likes') }),
+        els.sNew = h('button', { type: 'button', 'aria-pressed': 'false', text: '新しい順', onclick: () => setSort('new') }),
+      ]),
+    ]),
+    els.list = h('ul', { class: 'qs' }),
+  ]));
+  els.ta.addEventListener('input', () => {
+    const n = els.ta.value.length;
+    els.count.textContent = n + ' / ' + MAX_TEXT;
+    els.count.className = 'count' + (n > MAX_TEXT ? ' over' : '');
+    // 書きかけの質問は端末に保存（文章を直したら、新しい投稿として扱う）
+    store.set(PENDING_KEY, els.ta.value.trim() ? { text: els.ta.value, req: null } : null);
+  });
+  const pend = store.get(PENDING_KEY, null);
+  if (pend && pend.text) { els.ta.value = pend.text; els.ta.dispatchEvent(new Event('input')); status('送信していない質問を復元しました。', 'warn'); }
+  renderTeam();
+  tickCooldown();
+}
+
+function renderTeam(editing) {
+  const team = store.get('qaTeam', '');
+  const box = els.teamBox;
+  box.innerHTML = '';
+  if (team && !editing) {
+    box.appendChild(h('div', { class: 'team-bar' }, [
+      h('span', { class: 'k', text: 'チーム名' }),
+      h('span', { class: 'team-name', text: team }),
+      h('button', { type: 'button', text: '変更', onclick: () => renderTeam(true) }),
+    ]));
+    return;
+  }
+  const input = h('input', { type: 'text', maxlength: String(MAX_TEAM), placeholder: '例：あかつき', 'aria-label': 'チーム名', value: team });
+  const save = () => {
+    const v = input.value.normalize('NFKC').trim();
+    if (!v) { input.focus(); return; }
+    store.set('qaTeam', v.slice(0, MAX_TEAM));
+    renderTeam();
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+  box.appendChild(h('div', { class: 'team-form' }, [input, h('button', { class: 'btn', type: 'button', text: '決定', onclick: save })]));
+  box.appendChild(h('p', { class: 'hint', text: 'Slido投稿用チーム名（課題ダッシュボードに表示されています）を入力してください。' }));
+  if (editing) input.focus();
+}
+
+function setSort(s) {
+  sortBy = s;
+  els.sLikes.setAttribute('aria-pressed', String(s === 'likes'));
+  els.sNew.setAttribute('aria-pressed', String(s === 'new'));
+  render();
+}
+
+function status(msg, kind) { els.status.textContent = msg || ''; els.status.className = 'status' + (kind ? ' ' + kind : ''); }
+
+function renderStudent() {
+  const list = sorted(questions);
+  els.listTitle.textContent = 'みんなの質問（' + list.length + '件）';
+  els.list.innerHTML = '';
+  if (!list.length) { els.list.appendChild(h('li', { class: 'empty', text: 'まだ質問はありません。最初の質問を投稿してみましょう。' })); return; }
+  list.forEach(q => {
+    const mine = liked.has(q.id);
+    els.list.appendChild(h('li', { class: 'q' + (q.done ? ' done' : '') }, [
+      h('button', { class: 'like', type: 'button', 'aria-pressed': String(mine), disabled: mine, 'aria-label': (mine ? 'いいね済み' : 'いいね') + '（' + likesOf(q) + '）', onclick: () => like(q) }, [
+        h('span', { class: 'n', text: String(likesOf(q)) }), h('span', { class: 't', text: 'いいね' }),
+      ]),
+      h('div', null, [
+        h('p', { class: 'q-text', text: q.text }),
+        h('p', { class: 'q-meta' }, [q.team + '　' + timeText(q.time), q.done ? h('span', { class: 'badge', text: '読み上げ済み' }) : null]),
+      ]),
+    ]));
+  });
+}
+
+/* ───── 投稿 ───── */
+function cooldownLeft() { return Math.max(0, Math.ceil((store.get(COOL_KEY, 0) - Date.now()) / 1000)); }
+function tickCooldown() {
+  const left = cooldownLeft();
+  if (!els.send) return;
+  if (left > 0) { els.send.disabled = true; els.send.textContent = 'あと' + left + '秒'; setTimeout(tickCooldown, 500); }
+  else if (!sending) { els.send.disabled = false; els.send.textContent = '投稿する'; }
+}
+let sending = false;
+async function send() {
+  const team = store.get('qaTeam', '');
+  const text = els.ta.value.trim();
+  if (!team) { status('先にチーム名を入力してください。', 'err'); return; }
+  if (!text) { status('質問を入力してください。', 'err'); els.ta.focus(); return; }
+  if (text.length > MAX_TEXT) { status(MAX_TEXT + '文字以内にしてください。', 'err'); return; }
+  if (cooldownLeft() > 0 || sending) return;
+  let pend = store.get(PENDING_KEY, null) || {};
+  if (!pend.req || pend.text !== els.ta.value) pend = { text: els.ta.value, req: uuid() };
+  store.set(PENDING_KEY, pend);
+  sending = true; els.send.disabled = true; els.ta.readOnly = true;
+  status('投稿しています…');
+  const delays = [1500, 4000, 8000];
+  try {
+    for (let i = 0; ; i++) {
+      let res = null;
+      try { res = await apiPost({ action: 'post', team: team, text: text, req: pend.req }); } catch (e) { res = { ok: false, error: 'network' }; }
+      if (res.ok) {
+        els.ta.value = ''; els.ta.dispatchEvent(new Event('input')); store.set(PENDING_KEY, null);
+        store.set(COOL_KEY, Date.now() + (res.cooldown || 30) * 1000);
+        status(res.duplicate ? 'この質問は投稿済みでした（二重には投稿していません）。' : '投稿しました。', 'ok');
+        setSort('new'); load();
+        return;
+      }
+      if (res.error === 'cooldown') { store.set(COOL_KEY, Date.now() + (res.wait || 10) * 1000); status('続けて投稿できません。少し待ってから投稿してください。', 'warn'); return; }
+      if (res.error === 'too_long') { status('チーム名は' + MAX_TEAM + '文字、質問は' + MAX_TEXT + '文字以内にしてください。', 'err'); return; }
+      if (res.error === 'team_required' || res.error === 'text_required') { status('チーム名と質問を入力してください。', 'err'); return; }
+      if (i >= delays.length) { status('投稿できませんでした。書いた質問は残っています。少し待ってから、もう一度「投稿する」を押してください（二重には投稿されません）。', 'err'); return; }
+      status('混み合っています。自動でもう一度送っています（' + (i + 1) + '回目）…', 'warn');
+      await sleep(delays[i]);
+    }
+  } finally {
+    sending = false; els.ta.readOnly = false; tickCooldown();
+  }
+}
+
+/* ───── いいね（数秒ごとにまとめて送る） ───── */
+function like(q) {
+  if (liked.has(q.id)) return;
+  liked.add(q.id); store.set(LIKED_KEY, Array.from(liked));
+  boost[q.id] = q.likes + 1;
+  likeQueue.push(q.id); store.set('qaLikeQueue:' + EVENT, likeQueue);
+  render();
+}
+let flushing = false;
+async function flushLikes() {
+  if (flushing || !likeQueue.length || !API_URL) return;
+  flushing = true;
+  const ids = likeQueue.slice(0, 50);
+  try {
+    const res = await apiPost({ action: 'like', ids: ids });
+    if (res && res.ok) {
+      likeQueue = likeQueue.filter(id => ids.indexOf(id) === -1);
+      store.set('qaLikeQueue:' + EVENT, likeQueue);
+    }
+  } catch (e) { /* 次の回にもう一度送る */ }
+  finally { flushing = false; }
+}
+
+/* ═════════ 投影用の画面 ═════════ */
+function buildScreen() {
+  document.body.classList.add('screen');
+  const joinUrl = location.origin + location.pathname + (EVENT !== 'default' ? '?e=' + encodeURIComponent(EVENT) : '') + (P.get('t') ? (EVENT !== 'default' ? '&' : '?') + 't=' + encodeURIComponent(P.get('t')) : '');
+  const app = document.getElementById('app');
+  app.appendChild(h('div', { class: 'screen-wrap' }, [
+    h('aside', { class: 'join' }, [
+      h('p', { class: 'course', text: COURSE }),
+      h('h1', { text: TITLE }),
+      els.qr = h('div', { class: 'qr', 'aria-label': '参加用のQRコード' }),
+      h('p', { class: 'join-url', text: (function () { try { return decodeURI(joinUrl); } catch (e) { return joinUrl; } })() }),
+      els.tally = h('p', { class: 'tally' }),
+      KEY ? h('p', { class: 'join-url', text: '管理モード：質問の「読み上げ済み」「非表示」を切り替えられます' }) : null,
+      connEl = h('p', { class: 'join-url', hidden: true }),
+    ]),
+    els.board = h('section', { class: 'board', 'aria-label': 'いいねの多い質問' }),
+  ]));
+  // QRコード（ライブラリを読み込めなかったときは、URLの表示だけにする）
+  let tries = 0;
+  const makeQr = () => {
+    if (window.QRCode) { new QRCode(els.qr, { text: joinUrl, width: 480, height: 480, correctLevel: QRCode.CorrectLevel.M }); }
+    else if (++tries < 20) setTimeout(makeQr, 300);
+    else els.qr.hidden = true;
+  };
+  makeQr();
+}
+
+function adminButtons(q) {
+  if (!KEY) return null;
+  const act = async (action, value) => {
+    try { const r = await apiPost({ action: action, id: q.id, value: value, key: KEY }); if (!r.ok) alert('変更できませんでした（' + r.error + '）'); }
+    catch (e) { alert('通信できませんでした。'); }
+    load();
+  };
+  return h('span', { class: 'admin' }, [
+    h('button', { type: 'button', text: q.done ? '未読に戻す' : '読み上げ済み', onclick: () => act('done', !q.done) }),
+    h('button', { type: 'button', text: q.hidden ? '表示に戻す' : '非表示', onclick: () => { if (q.hidden || confirm('この質問を非表示にしますか？')) act('hide', !q.hidden); } }),
+  ]);
+}
+
+function renderScreen() {
+  const list = sorted(questions);
+  const shown = list.filter(q => !q.hidden);
+  els.tally.innerHTML = '';
+  els.tally.appendChild(h('span', null, ['質問 ', h('b', { text: String(shown.length) }), ' 件']));
+  els.board.innerHTML = '';
+  if (!list.length) { els.board.appendChild(h('p', { class: 'empty', text: 'QRコードを読み取って、質問を投稿してください。' })); return; }
+  const [first, ...rest] = KEY ? list : shown;
+  if (!first) return;
+  els.board.appendChild(h('article', { class: 'top' + (first.done ? ' done' : '') }, [
+    h('div', { class: 'votes' }, [h('span', { class: 'n', text: String(first.likes) }), h('span', { class: 't', text: 'いいね' })]),
+    h('div', null, [
+      h('p', { class: 'q-text', text: first.text }),
+      h('p', { class: 'q-meta' }, [first.team + (first.done ? '　読み上げ済み' : '') + (first.hidden ? '　非表示中' : ''), ' ', adminButtons(first)]),
+    ]),
+  ]));
+  const ul = h('ol', { class: 'rest' });
+  rest.slice(0, KEY ? 60 : 9).forEach(q => {
+    ul.appendChild(h('li', { class: (q.done ? 'done' : '') + (q.hidden ? ' hidden-q' : '') }, [
+      h('span', { class: 'n', text: String(q.likes) }),
+      h('div', null, [h('p', { class: 'q-text', text: q.text }), h('p', { class: 'q-meta', text: q.team + (q.done ? '　読み上げ済み' : '') + (q.hidden ? '　非表示中' : '') })]),
+      adminButtons(q),
+    ]));
+  });
+  els.board.appendChild(ul);
+}
+
+function render() { SCREEN ? renderScreen() : renderStudent(); }
+
+/* ═════════ 起動 ═════════ */
+if (!API_URL) {
+  document.getElementById('app').appendChild(h('div', { class: 'wrap' }, [
+    h('h1', { text: '設定が必要です' }),
+    h('p', { class: 'notice', text: 'index.html の API_URL に、GASのウェブアプリのURL（…/exec）を貼り付けてください。' }),
+  ]));
+} else {
+  SCREEN ? buildScreen() : buildStudent();
+  render();
+  load();
+  // 自動更新：投影画面は4秒、学生の画面は15〜20秒おき（画面を開いているときだけ）
+  const every = SCREEN ? 4000 : 15000 + Math.floor(Math.random() * 5000);
+  setInterval(() => { if (document.visibilityState === 'visible') load(); }, every);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
+  if (!SCREEN) setInterval(flushLikes, 3000 + Math.floor(Math.random() * 1500));
+  window.addEventListener('beforeunload', () => { if (likeQueue.length) flushLikes(); });
+}
+</script>
+</body>
+</html>
