@@ -123,6 +123,13 @@
   .top .admin button { border-color: var(--rule); color: var(--ink); }
   .screen .empty { color: rgba(255, 255, 255, .7); font-size: 1.4rem; }
   @media (max-width: 800px) { .screen-wrap { grid-template-columns: 1fr; } }
+
+  /* ───── 講師用の画面 ───── */
+  .speaker-wrap { max-width: 1400px; margin: 0 auto; padding: 2.4vw 3vw 4vw; display: flex; flex-direction: column; gap: 1.6vw; }
+  .speaker-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; }
+  .speaker-head h1 { color: #fff; font-size: clamp(1.3rem, 2vw, 2.2rem); margin-right: auto; }
+  .speaker-head .course { color: rgba(255, 255, 255, .7); width: 100%; }
+  .speaker-note { margin: 0; color: rgba(255, 255, 255, .7); font-size: clamp(.85rem, 1vw, 1.05rem); }
   @media (prefers-reduced-motion: no-preference) { .like[aria-pressed="true"] { transition: background .15s; } }
 </style>
 </head>
@@ -141,12 +148,15 @@ const MAX_TEAM = 20;
  *   ?e=第3回               … イベント（回）ごとに質問を分ける
  *   ?view=screen           … 投影用の画面
  *   ?view=screen&key=合言葉 … 投影用の画面＋管理（非表示・読み上げ済み）
+ *   ?view=speaker          … 講師用の画面（読むだけ。投稿欄・ボタン・QRコードなし）
  *   &t=対談①              … 画面に出すタイトル（省略時は e）
  */
 const P = new URLSearchParams(location.search);
 const EVENT = (P.get('e') || 'default').slice(0, 40);
 const TITLE = P.get('t') || (EVENT === 'default' ? '講師への質問' : EVENT + '　講師への質問');
 const SCREEN = P.get('view') === 'screen';
+const SPEAKER = P.get('view') === 'speaker';
+const BOARD = SCREEN || SPEAKER;   // いいね順の一覧を大きく表示する画面
 const KEY = P.get('key') || '';
 
 /* ═════════ 端末に保存する情報 ═════════ */
@@ -213,8 +223,8 @@ function timeText(ms) {
 function likesOf(q) { return Math.max(q.likes, boost[q.id] || 0); }
 function sorted(list) {
   return list.slice().sort((a, b) => {
-    if (SCREEN && a.done !== b.done) return a.done ? 1 : -1;
-    if (sortBy === 'likes' || SCREEN) return (likesOf(b) - likesOf(a)) || (a.time - b.time);
+    if (BOARD && a.done !== b.done) return a.done ? 1 : -1;
+    if (sortBy === 'likes' || BOARD) return (likesOf(b) - likesOf(a)) || (a.time - b.time);
     return b.time - a.time;
   });
 }
@@ -409,6 +419,21 @@ function buildScreen() {
   makeQr();
 }
 
+function buildSpeaker() {
+  document.body.classList.add('screen');
+  const app = document.getElementById('app');
+  app.appendChild(h('div', { class: 'speaker-wrap' }, [
+    h('header', { class: 'speaker-head' }, [
+      h('p', { class: 'course', text: COURSE }),
+      h('h1', { text: TITLE }),
+      els.tally = h('p', { class: 'tally' }),
+    ]),
+    h('p', { class: 'speaker-note', text: '学生からの質問を、いいねの多い順に表示しています（自動で更新されます）。読み上げが終わった質問は下に移ります。' }),
+    connEl = h('p', { class: 'speaker-note', hidden: true }),
+    els.board = h('section', { class: 'board', 'aria-label': 'いいねの多い質問' }),
+  ]));
+}
+
 function adminButtons(q) {
   if (!KEY) return null;
   const act = async (action, value) => {
@@ -428,7 +453,7 @@ function renderScreen() {
   els.tally.innerHTML = '';
   els.tally.appendChild(h('span', null, ['質問 ', h('b', { text: String(shown.length) }), ' 件']));
   els.board.innerHTML = '';
-  if (!list.length) { els.board.appendChild(h('p', { class: 'empty', text: 'QRコードを読み取って、質問を投稿してください。' })); return; }
+  if (!list.length) { els.board.appendChild(h('p', { class: 'empty', text: SPEAKER ? 'まだ質問はありません。学生が投稿すると、ここに表示されます。' : 'QRコードを読み取って、質問を投稿してください。' })); return; }
   const [first, ...rest] = KEY ? list : shown;
   if (!first) return;
   els.board.appendChild(h('article', { class: 'top' + (first.done ? ' done' : '') }, [
@@ -439,7 +464,7 @@ function renderScreen() {
     ]),
   ]));
   const ul = h('ol', { class: 'rest' });
-  rest.slice(0, KEY ? 60 : 9).forEach(q => {
+  rest.slice(0, KEY ? 60 : SPEAKER ? 40 : 9).forEach(q => {
     ul.appendChild(h('li', { class: (q.done ? 'done' : '') + (q.hidden ? ' hidden-q' : '') }, [
       h('span', { class: 'n', text: String(q.likes) }),
       h('div', null, [h('p', { class: 'q-text', text: q.text }), h('p', { class: 'q-meta', text: q.team + (q.done ? '　読み上げ済み' : '') + (q.hidden ? '　非表示中' : '') })]),
@@ -449,7 +474,7 @@ function renderScreen() {
   els.board.appendChild(ul);
 }
 
-function render() { SCREEN ? renderScreen() : renderStudent(); }
+function render() { BOARD ? renderScreen() : renderStudent(); }
 
 /* ═════════ 起動 ═════════ */
 if (!API_URL) {
@@ -458,14 +483,14 @@ if (!API_URL) {
     h('p', { class: 'notice', text: 'index.html の API_URL に、GASのウェブアプリのURL（…/exec）を貼り付けてください。' }),
   ]));
 } else {
-  SCREEN ? buildScreen() : buildStudent();
+  SCREEN ? buildScreen() : SPEAKER ? buildSpeaker() : buildStudent();
   render();
   load();
-  // 自動更新：投影画面は4秒、学生の画面は15〜20秒おき（画面を開いているときだけ）
-  const every = SCREEN ? 4000 : 15000 + Math.floor(Math.random() * 5000);
+  // 自動更新：投影画面は4秒、講師用は5秒、学生の画面は15〜20秒おき（画面を開いているときだけ）
+  const every = SCREEN ? 4000 : SPEAKER ? 5000 : 15000 + Math.floor(Math.random() * 5000);
   setInterval(() => { if (document.visibilityState === 'visible') load(); }, every);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') load(); });
-  if (!SCREEN) setInterval(flushLikes, 3000 + Math.floor(Math.random() * 1500));
+  if (!BOARD) setInterval(flushLikes, 3000 + Math.floor(Math.random() * 1500));
   window.addEventListener('beforeunload', () => { if (likeQueue.length) flushLikes(); });
 }
 </script>
