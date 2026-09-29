@@ -130,6 +130,40 @@
   .speaker-head h1 { color: #fff; font-size: clamp(1.3rem, 2vw, 2.2rem); margin-right: auto; }
   .speaker-head .course { color: rgba(255, 255, 255, .7); width: 100%; }
   .speaker-note { margin: 0; color: rgba(255, 255, 255, .7); font-size: clamp(.85rem, 1vw, 1.05rem); }
+
+  /* ───── 講師用・管理用：並べ替え・検索・キープ ───── */
+  .manage-col { display: flex; flex-direction: column; gap: 1.2vw; min-width: 0; }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  .sort.dark { border-color: rgba(255, 255, 255, .35); }
+  .sort.dark button { background: transparent; color: #fff; }
+  .sort.dark button[aria-pressed="true"] { background: var(--plate); color: var(--ink); }
+  .search { flex: 1; min-width: 200px; max-width: 420px; padding: .45em .8em; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .08); color: #fff; font-size: 1rem; }
+  .search::placeholder { color: rgba(255, 255, 255, .55); }
+  .shown-count { color: rgba(255, 255, 255, .75); font-size: .95rem; }
+  .kept { background: var(--surface); color: var(--ink); border-radius: 18px; padding: 1.2vw 1.8vw; }
+  .kept h2 { margin: 0 0 .3em; font-size: clamp(1.1rem, 1.5vw, 1.6rem); }
+  .kept-list { list-style: none; margin: 0; padding: 0; }
+  .kept-list li { display: grid; grid-template-columns: 4.5vw 1fr auto; gap: 1.4vw; align-items: baseline; padding: .8vw .2vw; border-bottom: 1px solid var(--rule); }
+  .kept-list li:last-child { border-bottom: 0; }
+  .kept-list li.done { opacity: .5; }
+  .kept-list .n { font-size: clamp(1.3rem, 2vw, 2.4rem); font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+  .kept-list .q-text { font-size: clamp(1.1rem, 1.7vw, 2rem); font-weight: 700; }
+  .kept-list .q-meta { color: var(--muted); font-size: clamp(.8rem, 1vw, 1.1rem); }
+  .keep { border: 1px solid rgba(255, 255, 255, .5); background: none; color: #fff; border-radius: 8px; padding: .2em .9em; cursor: pointer; font-size: .95rem; font-weight: 700; white-space: nowrap; }
+  .keep.on { background: var(--plate); border-color: var(--plate); color: var(--ink); }
+  .kept .keep { border-color: var(--rule); color: var(--ink); background: var(--paper); }
+
+  /* ───── 受付の状態・管理パネル ───── */
+  .state-badge { display: inline-block; padding: .05em .6em; border-radius: 999px; font-size: .8em; font-weight: 700; vertical-align: .1em; }
+  .state-badge.open { background: #e3f2ea; color: var(--ok); }
+  .state-badge.closed { background: #fbe4e2; color: var(--err); }
+  .panel { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 14px; }
+  .panel-title { margin: 4px 0 0; font-size: .85rem; color: rgba(255, 255, 255, .75); font-weight: 700; }
+  .panel-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .panel select { min-height: 36px; padding: .2em .5em; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .4); background: rgba(255, 255, 255, .1); color: #fff; }
+  .panel select option { color: var(--ink); }
+  .panel-btn { min-height: 36px; padding: .2em .9em; border: 0; border-radius: 8px; background: var(--plate); color: var(--ink); font-weight: 700; cursor: pointer; }
+  .panel-msg { margin: 0; min-height: 1.4em; font-size: .85rem; color: rgba(255, 255, 255, .85); }
   @media (prefers-reduced-motion: no-preference) { .like[aria-pressed="true"] { transition: background .15s; } }
 </style>
 </head>
@@ -143,6 +177,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxpP1tT-Ae7Hd3pzfKUQEcj
 const COURSE = 'ヒューマニスティック・リーダーシップWS2';
 const MAX_TEXT = 200;
 const MAX_TEAM = 20;
+const COOLDOWN_MIN = 5;   // 表示用（実際の制限はサーバー側の COOLDOWN_SEC）
 
 /* ═════════ URLのパラメータ ═════════
  *   ?e=第3回               … イベント（回）ごとに質問を分ける
@@ -158,6 +193,7 @@ const SCREEN = P.get('view') === 'screen';
 const SPEAKER = P.get('view') === 'speaker';
 const BOARD = SCREEN || SPEAKER;   // いいね順の一覧を大きく表示する画面
 const KEY = P.get('key') || '';
+const MANAGE = SPEAKER || (SCREEN && Boolean(KEY));   // 全件を並べ替え・検索できる画面（講師用・管理用）
 
 /* ═════════ 端末に保存する情報 ═════════ */
 const store = {
@@ -168,13 +204,19 @@ function uuid() { return (crypto.randomUUID ? crypto.randomUUID() : 'r' + Date.n
 const DEVICE = store.get('qaDevice', null) || (function () { const d = uuid(); store.set('qaDevice', d); return d; })();
 const LIKED_KEY = 'qaLiked:' + EVENT;
 const PENDING_KEY = 'qaPending:' + EVENT;
-const COOL_KEY = 'qaCool';
+const LAST_KEY = 'qaLast:' + EVENT;   // 最後に投稿した時刻
+const WAIT_KEY = 'qaWait:' + EVENT;   // サーバーから「あと◯秒」と言われたときの待ち終わりの時刻
 
 let questions = [];
+let settings = { open: true, cooldown: COOLDOWN_MIN * 60 };   // 受付中か・投稿後の待機秒数（管理用の画面で変更）
 let liked = new Set(store.get(LIKED_KEY, []));
 let likeQueue = store.get('qaLikeQueue:' + EVENT, []);
 let boost = {};          // いいねを押した直後の表示用（サーバーの数に反映されるまで）
 let sortBy = 'likes';
+let boardSort = 'likes';   // 講師用・管理用の並べ替え
+let boardQuery = '';       // 講師用・管理用の検索
+const KEEP_KEY = 'qaKeep:' + EVENT;
+let kept = store.get(KEEP_KEY, []);   // 講師がキープした質問（この端末だけに保存）
 let loading = false;
 
 /* ═════════ 通信 ═════════ */
@@ -195,7 +237,13 @@ async function load() {
   loading = true;
   try {
     const j = await apiGet();
-    if (j && j.ok) { questions = j.questions || []; render(); setConn(''); }
+    if (j && j.ok) {
+      questions = j.questions || [];
+      if (j.settings) settings = j.settings;
+      render(); setConn('');
+      if (!BOARD) { renderSettingsForStudent(); updateSendButton(); }
+      if (SCREEN && KEY) renderPanel();
+    }
     else setConn('一覧を読み込めませんでした。自動でやり直します。');
   } catch (e) {
     setConn('通信できませんでした。自動でやり直します。');
@@ -246,6 +294,8 @@ function buildStudent() {
         els.count = h('span', { class: 'count', text: '0 / ' + MAX_TEXT }),
         els.send = h('button', { class: 'btn', type: 'button', text: '投稿する', onclick: send }),
       ]),
+      els.closed = h('p', { class: 'notice', hidden: true, text: 'いまは質問を受け付けていません。質問を書いておくことはできます（受付が始まったら「投稿する」を押してください）。' }),
+      els.hint = h('p', { class: 'hint' }),
       els.status = h('p', { class: 'status', role: 'status' }),
     ]),
     connEl = h('p', { class: 'notice', hidden: true }),
@@ -268,6 +318,7 @@ function buildStudent() {
   const pend = store.get(PENDING_KEY, null);
   if (pend && pend.text) { els.ta.value = pend.text; els.ta.dispatchEvent(new Event('input')); status('送信していない質問を復元しました。', 'warn'); }
   renderTeam();
+  renderSettingsForStudent();
   tickCooldown();
 }
 
@@ -325,12 +376,36 @@ function renderStudent() {
 }
 
 /* ───── 投稿 ───── */
-function cooldownLeft() { return Math.max(0, Math.ceil((store.get(COOL_KEY, 0) - Date.now()) / 1000)); }
-function tickCooldown() {
+function waitText(sec) {
+  return sec >= 60 ? Math.floor(sec / 60) + '分' + (sec % 60 ? (sec % 60) + '秒' : '') : sec + '秒';
+}
+function durText(sec) {
+  return sec >= 60 && sec % 60 === 0 ? sec / 60 + '分' : waitText(sec);
+}
+/** 残りの待ち時間：最後に投稿した時刻＋いまの設定（途中で設定が変わってもすぐ反映） */
+function cooldownLeft() {
+  const last = store.get(LAST_KEY, 0);
+  const a = last && settings.cooldown > 0 ? Math.ceil((last + settings.cooldown * 1000 - Date.now()) / 1000) : 0;
+  const b = Math.ceil((store.get(WAIT_KEY, 0) - Date.now()) / 1000);
+  return Math.max(0, a, b);
+}
+let ticking = false;
+function updateSendButton() {
+  if (!els.send || sending) return;
   const left = cooldownLeft();
-  if (!els.send) return;
-  if (left > 0) { els.send.disabled = true; els.send.textContent = 'あと' + left + '秒'; setTimeout(tickCooldown, 500); }
-  else if (!sending) { els.send.disabled = false; els.send.textContent = '投稿する'; }
+  if (!settings.open) { els.send.disabled = true; els.send.textContent = '受付停止中'; }
+  else if (left > 0) {
+    els.send.disabled = true; els.send.textContent = 'あと' + waitText(left);
+    if (!ticking) { ticking = true; setTimeout(() => { ticking = false; updateSendButton(); }, 500); }
+  } else { els.send.disabled = false; els.send.textContent = '投稿する'; }
+}
+function tickCooldown() { updateSendButton(); }
+function renderSettingsForStudent() {
+  if (!els.hint) return;
+  els.hint.textContent = settings.cooldown > 0
+    ? '1つ投稿すると、' + durText(settings.cooldown) + '間は次の質問を投稿できません。よく考えてから投稿しましょう。' : '';
+  els.hint.hidden = !(settings.cooldown > 0);
+  els.closed.hidden = settings.open;
 }
 let sending = false;
 async function send() {
@@ -339,6 +414,7 @@ async function send() {
   if (!team) { status('先にチーム名を入力してください。', 'err'); return; }
   if (!text) { status('質問を入力してください。', 'err'); els.ta.focus(); return; }
   if (text.length > MAX_TEXT) { status(MAX_TEXT + '文字以内にしてください。', 'err'); return; }
+  if (!settings.open) { status('いまは質問を受け付けていません。', 'warn'); return; }
   if (cooldownLeft() > 0 || sending) return;
   let pend = store.get(PENDING_KEY, null) || {};
   if (!pend.req || pend.text !== els.ta.value) pend = { text: els.ta.value, req: uuid() };
@@ -352,12 +428,14 @@ async function send() {
       try { res = await apiPost({ action: 'post', team: team, text: text, req: pend.req }); } catch (e) { res = { ok: false, error: 'network' }; }
       if (res.ok) {
         els.ta.value = ''; els.ta.dispatchEvent(new Event('input')); store.set(PENDING_KEY, null);
-        store.set(COOL_KEY, Date.now() + (res.cooldown || 30) * 1000);
+        store.set(LAST_KEY, Date.now()); store.set(WAIT_KEY, 0);
+        if (typeof res.cooldown === 'number') settings.cooldown = res.cooldown;
         status(res.duplicate ? 'この質問は投稿済みでした（二重には投稿していません）。' : '投稿しました。', 'ok');
         setSort('new'); load();
         return;
       }
-      if (res.error === 'cooldown') { store.set(COOL_KEY, Date.now() + (res.wait || 10) * 1000); status('続けて投稿できません。少し待ってから投稿してください。', 'warn'); return; }
+      if (res.error === 'cooldown') { store.set(WAIT_KEY, Date.now() + (res.wait || 10) * 1000); status('続けて投稿できません。あと' + waitText(res.wait || 10) + '待ってから投稿してください。', 'warn'); return; }
+      if (res.error === 'closed') { settings.open = false; renderSettingsForStudent(); status('いまは質問を受け付けていません。書いた質問は残っています。', 'warn'); return; }
       if (res.error === 'too_long') { status('チーム名は' + MAX_TEAM + '文字、質問は' + MAX_TEXT + '文字以内にしてください。', 'err'); return; }
       if (res.error === 'team_required' || res.error === 'text_required') { status('チーム名と質問を入力してください。', 'err'); return; }
       if (i >= delays.length) { status('投稿できませんでした。書いた質問は残っています。少し待ってから、もう一度「投稿する」を押してください（二重には投稿されません）。', 'err'); return; }
@@ -365,7 +443,7 @@ async function send() {
       await sleep(delays[i]);
     }
   } finally {
-    sending = false; els.ta.readOnly = false; tickCooldown();
+    sending = false; els.ta.readOnly = false; updateSendButton();
   }
 }
 
@@ -404,11 +482,16 @@ function buildScreen() {
       els.qr = h('div', { class: 'qr', 'aria-label': '参加用のQRコード' }),
       h('p', { class: 'join-url', text: (function () { try { return decodeURI(joinUrl); } catch (e) { return joinUrl; } })() }),
       els.tally = h('p', { class: 'tally' }),
+      KEY ? buildPanel() : null,
       KEY ? h('p', { class: 'join-url', text: '管理モード：質問の「読み上げ済み」「非表示」を切り替えられます' }) : null,
       connEl = h('p', { class: 'join-url', hidden: true }),
     ]),
-    els.board = h('section', { class: 'board', 'aria-label': 'いいねの多い質問' }),
+    KEY ? h('div', { class: 'manage-col' }, [
+      els.tools = h('div', { class: 'tools' }),
+      els.board = h('section', { class: 'board', 'aria-label': '質問の一覧' }),
+    ]) : (els.board = h('section', { class: 'board', 'aria-label': 'いいねの多い質問' })),
   ]));
+  if (KEY) buildTools(els.tools);
   // QRコード（ライブラリを読み込めなかったときは、URLの表示だけにする）
   let tries = 0;
   const makeQr = () => {
@@ -417,6 +500,57 @@ function buildScreen() {
     else els.qr.hidden = true;
   };
   makeQr();
+}
+
+/* ───── 管理用：受付の開始・締切と、待機時間 ───── */
+const CD_OPTIONS = [[0, 'なし'], [30, '30秒'], [60, '1分'], [120, '2分'], [180, '3分'], [300, '5分'], [600, '10分'], [900, '15分']];
+function buildPanel() {
+  els.cdSel = h('select', { 'aria-label': '投稿後の待機時間' });
+  els.cdSel.addEventListener('change', () => { els.cdSel.dataset.dirty = '1'; });
+  const panel = h('div', { class: 'panel' }, [
+    h('p', { class: 'panel-title', text: '質問の受付' }),
+    h('div', { class: 'panel-row' }, [
+      els.openState = h('span', { class: 'state-badge' }),
+      els.openBtn = h('button', { type: 'button', class: 'panel-btn', onclick: toggleOpen }),
+    ]),
+    h('p', { class: 'panel-title', text: '投稿後の待機時間' }),
+    h('div', { class: 'panel-row' }, [els.cdSel, h('button', { type: 'button', class: 'panel-btn', text: '変更する', onclick: saveCooldown })]),
+    els.panelMsg = h('p', { class: 'panel-msg', role: 'status' }),
+  ]);
+  renderPanel();
+  return panel;
+}
+function renderPanel() {
+  if (!els.openState) return;
+  els.openState.className = 'state-badge ' + (settings.open ? 'open' : 'closed');
+  els.openState.textContent = settings.open ? '受付中' : '受付停止中';
+  els.openBtn.textContent = settings.open ? '受付を締め切る' : '受付を開始する';
+  if (!els.cdSel.dataset.dirty) {
+    const opts = CD_OPTIONS.slice();
+    if (!opts.some(o => o[0] === settings.cooldown)) opts.push([settings.cooldown, durText(settings.cooldown)]);
+    els.cdSel.innerHTML = '';
+    opts.forEach(([v, label]) => els.cdSel.appendChild(h('option', { value: String(v), text: label })));
+    els.cdSel.value = String(settings.cooldown);
+  }
+}
+async function saveSettings(data, done) {
+  els.panelMsg.textContent = '変更しています…';
+  try {
+    const r = await apiPost(Object.assign({ action: 'settings', key: KEY }, data));
+    if (!r.ok) { els.panelMsg.textContent = '変更できませんでした（' + r.error + '）'; return; }
+    settings = r.settings;
+    els.cdSel.dataset.dirty = '';
+    renderPanel(); render();
+    els.panelMsg.textContent = done(settings);
+  } catch (e) { els.panelMsg.textContent = '通信できませんでした。もう一度押してください。'; }
+}
+function toggleOpen() {
+  const next = !settings.open;
+  if (!next && !confirm('質問の受付を締め切りますか？\n（学生は投稿できなくなります。いいねは引き続き押せます）')) return;
+  saveSettings({ open: next }, s => s.open ? '受付を開始しました。' : '受付を締め切りました。');
+}
+function saveCooldown() {
+  saveSettings({ cooldown: Number(els.cdSel.value) }, s => '待機時間を「' + (s.cooldown ? durText(s.cooldown) : 'なし') + '」にしました（待っている学生にもすぐ反映されます）。');
 }
 
 function buildSpeaker() {
@@ -428,10 +562,99 @@ function buildSpeaker() {
       h('h1', { text: TITLE }),
       els.tally = h('p', { class: 'tally' }),
     ]),
-    h('p', { class: 'speaker-note', text: '学生からの質問を、いいねの多い順に表示しています（自動で更新されます）。読み上げが終わった質問は下に移ります。' }),
+    h('p', { class: 'speaker-note', text: '学生からの質問をすべて表示しています（自動で更新されます）。回答したい質問は「キープする」を押すと、上の「キープした質問」に固定されます。' }),
     connEl = h('p', { class: 'speaker-note', hidden: true }),
-    els.board = h('section', { class: 'board', 'aria-label': 'いいねの多い質問' }),
+    els.kept = h('section', { class: 'kept', 'aria-label': 'キープした質問', hidden: true }),
+    els.tools = h('div', { class: 'tools' }),
+    els.board = h('section', { class: 'board', 'aria-label': '質問の一覧' }),
   ]));
+  buildTools(els.tools);
+}
+
+/** 並べ替えと検索（一度だけ作る。自動更新で入力中の文字が消えないように） */
+function buildTools(box) {
+  const sorts = [['likes', 'いいね順'], ['likes-asc', 'いいねの少ない順'], ['new', '新しい順'], ['old', '古い順']];
+  const group = h('div', { class: 'sort dark', role: 'group', 'aria-label': '並べ替え' });
+  sorts.forEach(([k, label]) => {
+    group.appendChild(h('button', { type: 'button', 'data-k': k, 'aria-pressed': String(k === boardSort), text: label, onclick: () => {
+      boardSort = k;
+      Array.from(group.children).forEach(b => b.setAttribute('aria-pressed', String(b.getAttribute('data-k') === k)));
+      render();
+    } }));
+  });
+  const search = h('input', { type: 'search', class: 'search', placeholder: '質問文・チーム名で検索', 'aria-label': '質問を検索' });
+  search.addEventListener('input', () => { boardQuery = search.value; render(); });
+  els.shownCount = h('span', { class: 'shown-count' });
+  box.appendChild(group);
+  box.appendChild(search);
+  box.appendChild(els.shownCount);
+}
+
+function manageSorted(list) {
+  const q = boardQuery.normalize('NFKC').trim().toLowerCase();
+  const out = q ? list.filter(x => (x.text + ' ' + x.team).normalize('NFKC').toLowerCase().indexOf(q) !== -1) : list.slice();
+  const cmp = {
+    'likes': (a, b) => (b.likes - a.likes) || (a.time - b.time),
+    'likes-asc': (a, b) => (a.likes - b.likes) || (a.time - b.time),
+    'new': (a, b) => b.time - a.time,
+    'old': (a, b) => a.time - b.time,
+  }[boardSort];
+  return out.sort(cmp);
+}
+
+function toggleKeep(id) {
+  const i = kept.indexOf(id);
+  if (i === -1) kept.push(id); else kept.splice(i, 1);
+  store.set(KEEP_KEY, kept);
+  render();
+}
+
+function keepButton(q) {
+  const on = kept.indexOf(q.id) !== -1;
+  return h('button', { type: 'button', class: 'keep' + (on ? ' on' : ''), 'aria-pressed': String(on),
+    text: on ? 'キープ中' : 'キープする', onclick: () => toggleKeep(q.id) });
+}
+
+/** 講師用・管理用：キープ＋全件の一覧 */
+function renderManage() {
+  const all = questions.filter(q => KEY || !q.hidden);
+  els.tally.innerHTML = '';
+  els.tally.appendChild(h('span', null, ['質問 ', h('b', { text: String(questions.filter(q => !q.hidden).length) }), ' 件　', h('span', { class: 'state-badge ' + (settings.open ? 'open' : 'closed'), text: settings.open ? '受付中' : '受付停止中' })]));
+
+  if (SPEAKER) {
+    const byId = {};
+    questions.forEach(q => { byId[q.id] = q; });
+    const list = kept.map(id => byId[id]).filter(q => q && !q.hidden);
+    els.kept.innerHTML = '';
+    els.kept.hidden = !list.length;
+    if (list.length) {
+      els.kept.appendChild(h('h2', { text: 'キープした質問（' + list.length + '件）' }));
+      const ol = h('ol', { class: 'kept-list' });
+      list.forEach(q => ol.appendChild(h('li', { class: q.done ? 'done' : '' }, [
+        h('span', { class: 'n', text: String(q.likes) }),
+        h('div', null, [h('p', { class: 'q-text', text: q.text }), h('p', { class: 'q-meta', text: q.team + '　いいね ' + q.likes + (q.done ? '　読み上げ済み' : '') })]),
+        h('button', { type: 'button', class: 'keep', text: '外す', onclick: () => toggleKeep(q.id) }),
+      ])));
+      els.kept.appendChild(ol);
+    }
+  }
+
+  const list = manageSorted(all);
+  els.shownCount.textContent = boardQuery.trim() ? '該当 ' + list.length + ' 件' : '全 ' + list.length + ' 件を表示';
+  els.board.innerHTML = '';
+  if (!list.length) {
+    els.board.appendChild(h('p', { class: 'empty', text: boardQuery.trim() ? '該当する質問はありません。' : 'まだ質問はありません。学生が投稿すると、ここに表示されます。' }));
+    return;
+  }
+  const ol = h('ol', { class: 'rest' });
+  list.forEach(q => {
+    ol.appendChild(h('li', { class: (q.done ? 'done' : '') + (q.hidden ? ' hidden-q' : '') }, [
+      h('span', { class: 'n', text: String(q.likes) }),
+      h('div', null, [h('p', { class: 'q-text', text: q.text }), h('p', { class: 'q-meta', text: q.team + (q.done ? '　読み上げ済み' : '') + (q.hidden ? '　非表示中' : '') })]),
+      SPEAKER ? keepButton(q) : adminButtons(q),
+    ]));
+  });
+  els.board.appendChild(ol);
 }
 
 function adminButtons(q) {
@@ -451,7 +674,7 @@ function renderScreen() {
   const list = sorted(questions);
   const shown = list.filter(q => !q.hidden);
   els.tally.innerHTML = '';
-  els.tally.appendChild(h('span', null, ['質問 ', h('b', { text: String(shown.length) }), ' 件']));
+  els.tally.appendChild(h('span', null, ['質問 ', h('b', { text: String(shown.length) }), ' 件　', h('span', { class: 'state-badge ' + (settings.open ? 'open' : 'closed'), text: settings.open ? '受付中' : '受付停止中' })]));
   els.board.innerHTML = '';
   if (!list.length) { els.board.appendChild(h('p', { class: 'empty', text: SPEAKER ? 'まだ質問はありません。学生が投稿すると、ここに表示されます。' : 'QRコードを読み取って、質問を投稿してください。' })); return; }
   const [first, ...rest] = KEY ? list : shown;
@@ -474,7 +697,7 @@ function renderScreen() {
   els.board.appendChild(ul);
 }
 
-function render() { BOARD ? renderScreen() : renderStudent(); }
+function render() { MANAGE ? renderManage() : BOARD ? renderScreen() : renderStudent(); }
 
 /* ═════════ 起動 ═════════ */
 if (!API_URL) {
